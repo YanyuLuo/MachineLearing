@@ -9,50 +9,81 @@ from sklearn.model_selection import KFold, RepeatedKFold
 import xgboost as xgb
 from sklearn import linear_model
 
+# 代码参考网络博客
+# 导入的包中那些没有用到的是调试阶段中显示直方图用的
+
 df_train = pd.read_csv("datalab/happiness_train_complete.csv", encoding="ansi")
 df_test = pd.read_csv("datalab/happiness_test_complete.csv", encoding="ansi")
 
 y_train = df_train['happiness']
 y_train = y_train.map(lambda x: 3 if x == -8 else x)
+# -----把-8的都统一改成3，表示那些不知道自己幸不幸福的人用中位数代替
+# -----因为中位数3的效果测试发现更好，所以没有用众数4
 # sns.countplot(x='happiness', data=df_train)
-# ## 现在这个年龄划分 以及收入等级划分 都是好的 不用改了
 # plt.show()
 df_train.drop(["happiness"], axis=1, inplace=True)
 # 合并在一起方便处理 训练集和测试集,纵向拼接
 df_all = pd.concat((df_train, df_test), axis=0)
+
+# *******************
+# 【第一部分：数据处理】
+# *******************
+
+
+# 缺失超过60%的属性删了
 df_all.drop(['edu_other', 'invest_other', 'property_other', 'join_party',
              's_work_type', 's_work_status', 'work_status',
              'work_yr', 'work_manage', 'work_type', ], axis=1, inplace=True)
-
+# 全部缺失值填充为0 因为这些缺失值是因为没有结婚而导致的
 df_all['s_political'].fillna(0, inplace=True)
 df_all['s_hukou'].fillna(0, inplace=True)
 df_all['s_income'].fillna(0, inplace=True)
 df_all['s_birth'].fillna(0, inplace=True)
 df_all['s_edu'].fillna(0, inplace=True)
 df_all['s_work_exper'].fillna(0, inplace=True)
+# 全部缺失值填充为0 由于没有受过教育造成的
 df_all['edu_status'].fillna(0, inplace=True)
 df_all['edu_yr'].fillna(0, inplace=True)
+# 社交情况 缺失值是由于社交不频繁造成的 全部缺失值填充为7
 df_all['social_friend'].fillna(7, inplace=True)
 df_all['social_neighbor'].fillna(7, inplace=True)
+# 孩子情况 全部填充为0,因为没有孩子
 df_all['minor_child'].fillna(0, inplace=True)
+# 户口情况 缺失值是由于没有户口造成的 全部缺失值填充为4
 df_all['hukou_loc'].fillna(4, inplace=True)
+# 婚姻情况填充 因为源数据是2015年的
 df_all['marital_now'].fillna(2015, inplace=True)
 df_all['marital_1st'].fillna(2015, inplace=True)
+# 家庭收入 训练集中的family_income只有一条空记录，用平均值填充
 df_all['family_income'].fillna(df_all['family_income'].mean(), inplace=True)
 
-# 特征处理部分
+# *******************
+# 【第二部分：特征处理】
+# *******************
+
+
+# 宗教不均匀 保留没有删了好，所以删了
 df_all.drop(['religion', 'religion_freq'], axis=1, inplace=True)
+# 房产不均匀，只保留property_1和property_2效果发现最好
 df_all.drop(['property_0', 'property_3', 'property_4', 'property_5',
              'property_6', 'property_7', 'property_8'], axis=1, inplace=True)
-# sns.countplot(x='insur_1', data=df_all)
-# plt.show()
-df_all.drop(['insur_1', 'insur_2','insur_3', 'insur_4'], axis=1, inplace=True)
+# 商业保险、投资、父母政治面貌，网友说删了效果好
+df_all.drop(['insur_1', 'insur_2', 'insur_3', 'insur_4'], axis=1, inplace=True)
 df_all.drop(['invest_0', 'invest_1', 'invest_2', 'invest_3', 'invest_4',
              'invest_5'], axis=1, inplace=True)
 df_all.drop(['f_political', 'm_political'], axis=1, inplace=True)
-# 构造新特征
+
+# *******************
+# 【第三部分：构造新特征】
+# *******************
+
 df_all['class'] = df_all['class'].map(lambda x: 5 if x == -8 else x)
+# sns.countplot(x='class_10_after', data=df_all)
+# plt.show()
 df_all['edu'] = df_all['edu'].map(lambda x: 0 if x == -8 else x)
+
+
+# edu分级函数
 
 
 def edu_split(x):
@@ -74,14 +105,19 @@ def edu_split(x):
         return 7
 
 
-# 意思是edu和s_edu观察分析后都删了？
+# 意思是edu和s_edu分级后都删了，教育和其配偶教育
 df_all["edu"] = df_all["edu"].map(edu_split)
 df_all.drop(['edu'], axis=1, inplace=True)
 df_all["s_edu"] = df_all["s_edu"].map(edu_split)
+# sns.countplot(x='s_edu', data=df_all)
+# plt.show()
 df_all.drop(['s_edu'], axis=1, inplace=True)
 
 df_all['survey_time'] = pd.to_datetime(df_all['survey_time'], format='%Y-%m-%d %H:%M:%S')
 df_all["hour"] = df_all["survey_time"].dt.hour
+
+
+# 时间分段函数，分段一天的时间
 
 
 def hour_cut(x):
@@ -102,11 +138,16 @@ def hour_cut(x):
 
 
 df_all["hour_cut"] = df_all["hour"].map(hour_cut)
+# sns.countplot(x='hour_cut', data=df_all)
+# plt.show()
+# 构造了 hour 和hour_cut 显然 hour应该被删除
 df_all.drop(['hour'], axis=1, inplace=True)
 
 
 # for i in range(0, 107):
 #     print(df_all.columns[i])
+
+# 年代分段函数
 def birth_split(x):
     if x < 1920:
         return 0
@@ -133,6 +174,11 @@ df_all["birth_s"] = df_all["birth"].map(birth_split)
 
 # sns.countplot(x='birth_s', data=df_all)
 # plt.show()
+
+
+# 年龄划分函数
+
+
 def age_class(x):
     if x < 0:
         return 0
@@ -152,9 +198,15 @@ def age_class(x):
         return 7
 
 
+# 转换时间格式,求出每个人的年龄 分完级去掉age
 df_all['age'] = pd.to_datetime(df_all['survey_time']).dt.year - df_all['birth']
 df_all["age_class"] = df_all['age'].map(age_class)
+# sns.countplot(x='age_class', data=df_all)
+# plt.show()
 df_all.drop(['age'], axis=1, inplace=True)
+
+
+# 肥胖划分函数，据说这个很影响幸福感
 
 
 def get_fat(x):
@@ -172,14 +224,19 @@ def get_fat(x):
         return 5
 
 
+# 借用网友的增加BMI 体重/身高的平方（国际单位kg/㎡） 这边确实厘米和斤
 height = df_all["height_cm"] / 100
 kg = df_all["weight_jin"] / 2
 bmi = kg / pow(height, 2)
 df_all["bmi"] = bmi
 df_all["fat"] = df_all["bmi"].map(get_fat)
-
+# sns.countplot(x='fat', data=df_all)
+# plt.show()
 df_all.drop(['bmi'], axis=1, inplace=True)
 df_all.drop(['weight_jin'], axis=1, inplace=True)
+
+
+# 收入分级函数
 
 
 def get_income_class(x):
@@ -199,7 +256,12 @@ def get_income_class(x):
 
 df_all["income"] = df_all["income"].map(lambda x: 0 if x < 0 else x)
 df_all["income_class"] = df_all["income"].map(get_income_class)
+# sns.countplot(x='income_class', data=df_all)
+# plt.show()
 df_all.drop(['income'], axis=1, inplace=True)
+
+
+# 对住房面积进行划分
 
 
 def floor_area_split(x):
@@ -228,6 +290,12 @@ def floor_area_split(x):
 df_all["floor_area_s"] = df_all["floor_area"].map(floor_area_split)
 
 
+# sns.countplot(x='floor_area_s', data=df_all)
+# plt.show()
+
+# 对省份进行分级 因为发现幸福感和省份关系还比较大
+
+
 def province_split(x):
     if x in [6, 1, 12, 28, 13]:
         return 0
@@ -242,8 +310,13 @@ def province_split(x):
 
 
 df_all["province_s"] = df_all["province"].map(province_split)
+# sns.countplot(x='province_s', data=df_all)
+# plt.show()
+# 既然已对省份划分 那么省去省份这个属性
 df_all.drop(['province'], axis=1, inplace=True)
+# 人均住房面积
 df_all['aver_area'] = df_all['floor_area'] / df_all['family_m']
+# 删除住房面积,人居住房面积
 df_all.drop(['floor_area'], axis=1, inplace=True)
 df_all.drop(['id'], axis=1, inplace=True)
 df_all.drop(['survey_time', 'birth'], axis=1, inplace=True)
@@ -270,11 +343,17 @@ def mar_yr_class(x):
         return 8
 
 
+# 删除其他时间数据
 df_all['mar_yr'] = 2015 - df_all['marital_now']
 df_all.drop(['s_birth', 'f_birth', 'm_birth'], axis=1, inplace=True)
 df_all.drop(['marital_now'], axis=1, inplace=True)
+# 网友建议处理一下“公平”效果好
 df_all['equity'] = df_all['equity'].map(lambda x: 3 if x == -8 else x)
+# sns.countplot(x='equity', data=df_all)
+# plt.show()
 
+
+# 使用z-score方法 进行数据规范化
 numeric_cols = ['height_cm', 's_income', 'house', 'family_income', 'family_m',
                 'son', 'daughter', 'minor_child', 'inc_exp', 'public_service_1',
                 'public_service_2', 'public_service_3', 'public_service_4',
@@ -284,6 +363,8 @@ numeric_cols_means = df_all.loc[:, numeric_cols].mean()
 numeric_cols_std = df_all.loc[:, numeric_cols].std()
 df_numeric = (df_all.loc[:, numeric_cols] - numeric_cols_means) / numeric_cols_std
 df_numeric.iloc[:, 1].hist()
+# plt.show()
+# 对object类型进行规范化  调用get_dummies函数
 df_object = df_all.drop(numeric_cols, axis=1)
 df_object = df_object.astype(str)
 for cols in list(df_object.iloc[:, 1:].columns):
@@ -299,8 +380,16 @@ X_test = test_data.values
 # print(len(y_train))
 # print(len(X_test))
 
-# 算法融合
+# *******************
+# 【第四部分：算法模型选择与融合】
+# *******************
+# PS：关于模型选择，lightgbm(lgb),xgboost(xgb),catboost(ctb)
+# 看一篇博文上进行了融合探究能提升分数
+# 然后lgb和xgb融合的效果最好，按照说明验证了下，确实这两个模型组合分数高一点
 
+# 超参数太难调了，哇~
+# 实在调不动了，借用网友给的可能最优的参数
+# 首先，lgb
 param = {'boosting_type': 'gbdt',
          'num_leaves': 20,
          'min_data_in_leaf': 19,
@@ -319,9 +408,9 @@ param = {'boosting_type': 'gbdt',
 folds = KFold(n_splits=5, shuffle=True, random_state=2018)
 oof_lgb = np.zeros(len(X_train))
 predictions_lgb = np.zeros(len(X_test))
-
+# 网上的训练过程，不是特别懂
 for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
-    # print("fold n°{}".format(fold_ + 1))
+    print("fold n°{}".format(fold_ + 1))
     trn_data = lgb.Dataset(X_train[trn_idx], y_train[trn_idx])
 
     val_data = lgb.Dataset(X_train[val_idx], y_train[val_idx])
@@ -333,19 +422,24 @@ for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
 
     predictions_lgb += clf.predict(X_test, num_iteration=clf.best_iteration) / folds.n_splits
 
-
 # print("CV score: {:<8.8f}".format(mean_squared_error(oof_lgb, y_train)))
+
+
+# 然后xbg
+# 测试用的评价函数myFeval
+
 def myFeval(preds, xgbtrain):
     label = xgbtrain.get_label()
     score = mean_squared_error(label, preds)
     return 'myFeval', score
 
 
-xgb_params = {"booster": 'gbtree', 'eta': 0.01, 'max_depth': 5, 'subsample': 0.75,
+xgb_params = {"booster": 'gbtree', 'eta': 0.01, 'max_depth': 5, 'subsample': 0.7,
               'colsample_bytree': 0.6, 'objective': 'reg:linear', 'eval_metric': 'rmse', 'silent': True, 'nthread': 8}
 folds = KFold(n_splits=2, shuffle=True, random_state=2018)
 oof_xgb = np.zeros(8000)
 predictions_xgb = np.zeros(2968)
+
 for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
     # print("fold n°{}".format(fold_ + 1))
     trn_data = xgb.DMatrix(X_train[trn_idx], y_train[trn_idx])
@@ -358,6 +452,10 @@ for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
     predictions_xgb += clf.predict(xgb.DMatrix(X_test), ntree_limit=clf.best_ntree_limit) / folds.n_splits
 
 # print("CV score: {:<8.8f}".format(mean_squared_error(oof_xgb, y_train)))
+
+# 【开始融合模型】
+# 借用网友的融合代码
+# vstack函数作用是垂直堆叠？暂时懂了
 train_stack = np.vstack([oof_lgb, oof_xgb]).transpose()
 test_stack = np.vstack([predictions_lgb, predictions_xgb]).transpose()
 folds_stack = RepeatedKFold(n_splits=5, n_repeats=2, random_state=2018)
@@ -369,7 +467,9 @@ for fold_, (trn_idx, val_idx) in enumerate(folds_stack.split(train_stack, y_trai
     val_data, val_y = train_stack[val_idx], y_train[val_idx]
 
     clf_3 = linear_model.BayesianRidge()
-    # clf_3 =linear_model.Ridge()
+    # clf_3 = linear_model.Ridge()
+    # clf_3 = linear_model.LinearRegression()
+    # clf_3 = linear_model.LassoCV()
     clf_3.fit(trn_data, trn_y)
 
     oof_stack[val_idx] = clf_3.predict(val_data)
